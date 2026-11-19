@@ -3,7 +3,7 @@
 Hyprpaper-CLI und Fuzzel-TUI mit globalem Default, Monitor-Overrides und Hot-Plug-Wiederherstellung.
 
 **[Dokumentation und CLI-Befehle](https://aco-arch-dotfiles.readthedocs.io/en/latest/components/#wallpaper)** ·
-[Desktop-Anleitung](https://aco-arch-dotfiles.readthedocs.io/en/latest/hyprland/) ·
+[Desktop-Anleitung](https://aco-hypr.readthedocs.io/en/latest/keybindings/) ·
 [Installation und Updates](https://aco-arch-dotfiles.readthedocs.io/en/latest/arch-package/)
 
 ```bash
