@@ -7,7 +7,7 @@ Hyprpaper-CLI und Fuzzel-TUI mit globalem Default, Monitor-Overrides und Hot-Plu
 [Installation und Updates](https://arch-dotfiles.readthedocs.io/en/latest/arch-package/)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MichaelWeissDEV/dotfiles/main/install.sh | bash -s -- wallpaper
+curl -fsSL https://raw.githubusercontent.com/Akademie-Olympia/aco-dotfiles/main/install.sh | bash -s -- wallpaper
 ```
 
 Paket: `arch-dotfiles-wallpaper`. Datei: `~/.config/wallpaper/wallpaper.conf`.
@@ -23,6 +23,6 @@ aktualisieren. Entwicklung und lokale Builds: [PACKAGING.md](PACKAGING.md).
 
 Eigene Änderungen in der aktivierten Benutzerkopie bleiben bei der Synchronisierung erhalten; neue abweichende Vorgaben erscheinen als `.pacnew`. Siehe [Update und Wiederherstellung](https://arch-dotfiles.readthedocs.io/en/latest/verification/).
 
-[![Package safety](https://github.com/MichaelWeissDEV/wallpaper-config/actions/workflows/package.yml/badge.svg)](https://github.com/MichaelWeissDEV/wallpaper-config/actions/workflows/package.yml)
+[![Package safety](https://github.com/Akademie-Olympia/aco-wallpaper/actions/workflows/package.yml/badge.svg)](https://github.com/Akademie-Olympia/aco-wallpaper/actions/workflows/package.yml)
 
 [MIT-Lizenz](LICENSE).
