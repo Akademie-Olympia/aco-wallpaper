@@ -9,6 +9,20 @@
 ::::{grid} 1 2 2 3
 :gutter: 3
 
+:::{grid-item-card} Aufbau & Abhängigkeiten
+:link: design
+:link-type: doc
+
+Warum so gebaut, benötigte Pakete, Bibliotheken und Versionen.
+:::
+
+:::{grid-item-card} Anleitung
+:link: guide
+:link-type: doc
+
+Alltag, Einstellungen im Detail, Fehlersuche.
+:::
+
 :::{grid-item-card} Befehle
 :link: cli
 :link-type: doc
@@ -43,6 +57,8 @@ Tasten und Desktop-Anleitung.
 :hidden:
 :maxdepth: 2
 
+design
+guide
 cli
 installation
 configuration
