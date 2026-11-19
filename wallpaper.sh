@@ -85,6 +85,12 @@ load_config() {
         WALLPAPER_DIRS=("$DOTFILES_ROOT/pictures")
     fi
 
+    # Mit "wallpaper dirs add" ergänzte Ordner (Status, nicht Konfiguration)
+    local extra
+    while IFS= read -r extra; do
+        [[ -n "$extra" ]] && WALLPAPER_DIRS+=("$extra")
+    done < <([[ -f "$STATE_FILE" ]] && awk -F '\t' '$1 == "dir" { print $2 }' "$STATE_FILE" || true)
+
     case "$WALLPAPER_FIT" in
         contain|cover|tile|fill) ;;
         *)
@@ -144,6 +150,80 @@ state_clear_monitors() {
     local tmp
     tmp="$(mktemp "$STATE_DIR/.state.XXXXXX")"
     awk -F '\t' '$1 != "monitor"' "$STATE_FILE" > "$tmp"
+    mv "$tmp" "$STATE_FILE"
+}
+
+# Darstellung (Fit) und zusätzliche Ordner liegen ebenfalls im Status, damit die
+# Konfigurationsdatei nie vom Skript verändert wird:
+#   fit<TAB>MODE                  globaler Fit-Modus
+#   monitorfit<TAB>MON<TAB>MODE   Fit-Modus eines Monitors
+#   dir<TAB>PFAD                  zusätzlicher Wallpaper-Ordner
+state_fit_get() {
+    state_init
+    awk -F '\t' '$1 == "fit" { print $2; exit }' "$STATE_FILE"
+}
+
+state_monitor_fit_get() {
+    state_init
+    awk -F '\t' -v m="$1" '$1 == "monitorfit" && $2 == m { print $3; exit }' "$STATE_FILE"
+}
+
+state_set_fit() {
+    state_init
+    local tmp
+    tmp="$(mktemp "$STATE_DIR/.state.XXXXXX")"
+    awk -F '\t' -v OFS='\t' -v val="$1" '$1 != "fit" { print } END { print "fit", val }' "$STATE_FILE" > "$tmp"
+    mv "$tmp" "$STATE_FILE"
+}
+
+state_set_monitor_fit() {
+    state_init
+    local tmp
+    tmp="$(mktemp "$STATE_DIR/.state.XXXXXX")"
+    awk -F '\t' -v OFS='\t' -v mon="$1" -v val="$2" \
+        '!($1 == "monitorfit" && $2 == mon) { print } END { print "monitorfit", mon, val }' "$STATE_FILE" > "$tmp"
+    mv "$tmp" "$STATE_FILE"
+}
+
+state_clear_fit() {  # $1 = Monitor oder leer (alle Overrides + globaler Wert)
+    state_init
+    local tmp
+    tmp="$(mktemp "$STATE_DIR/.state.XXXXXX")"
+    if [[ -n "${1:-}" ]]; then
+        awk -F '\t' -v mon="$1" '!($1 == "monitorfit" && $2 == mon)' "$STATE_FILE" > "$tmp"
+    else
+        awk -F '\t' '$1 != "fit" && $1 != "monitorfit"' "$STATE_FILE" > "$tmp"
+    fi
+    mv "$tmp" "$STATE_FILE"
+}
+
+valid_fit() { [[ "${1:-}" =~ ^(cover|contain|tile|fill)$ ]]; }
+
+# Wirksamer Fit: Monitor-Override > globaler Status > wallpaper.conf
+effective_fit() {
+    local fit=""
+    [[ -n "${1:-}" ]] && fit="$(state_monitor_fit_get "$1")"
+    [[ -z "$fit" ]] && fit="$(state_fit_get)"
+    valid_fit "$fit" || fit="$WALLPAPER_FIT"
+    printf '%s' "$fit"
+}
+
+state_dirs_get() {
+    state_init
+    awk -F '\t' '$1 == "dir" { print $2 }' "$STATE_FILE"
+}
+
+state_dir_add() {
+    state_init
+    state_dirs_get | grep -qxF -- "$1" && return 0
+    printf 'dir\t%s\n' "$1" >> "$STATE_FILE"
+}
+
+state_dir_remove() {
+    state_init
+    local tmp
+    tmp="$(mktemp "$STATE_DIR/.state.XXXXXX")"
+    awk -F '\t' -v d="$1" '!($1 == "dir" && $2 == d)' "$STATE_FILE" > "$tmp"
     mv "$tmp" "$STATE_FILE"
 }
 
@@ -349,7 +429,7 @@ ensure_daemon() {
 
 hyprpaper_set() {
     local monitor="$1" path="$2"
-    hyprctl hyprpaper wallpaper "${monitor},${path},${WALLPAPER_FIT}" >/dev/null
+    hyprctl hyprpaper wallpaper "${monitor},${path},$(effective_fit "$monitor")" >/dev/null
 }
 
 apply_monitor() {
@@ -744,9 +824,31 @@ cmd_random() {
 }
 
 cmd_dirs() {
+    case "${1:-list}" in
+        add)
+            [[ -n "${2:-}" ]] || die "Verwendung: wallpaper dirs add <ordner>"
+            local dir="${2/#\~/$HOME}"
+            [[ -d "$dir" ]] || die "Ordner '$dir' existiert nicht."
+            dir="$(readlink -f -- "$dir")"
+            state_dir_add "$dir"
+            ok "Ordner hinzugefügt: $dir"
+            return 0
+            ;;
+        remove|rm)
+            [[ -n "${2:-}" ]] || die "Verwendung: wallpaper dirs remove <ordner>"
+            local dir="${2/#\~/$HOME}"
+            dir="$(readlink -f -- "$dir" 2>/dev/null || printf '%s' "$dir")"
+            state_dir_remove "$dir"
+            ok "Ordner entfernt (nur aus der Liste, nichts gelöscht): $dir"
+            return 0
+            ;;
+        list|"") ;;
+        *) die "Verwendung: wallpaper dirs [list | add <ordner> | remove <ordner>]" ;;
+    esac
+
     printf 'Konfiguration: %s\n' "$CONFIG_FILE"
     printf 'Status:        %s\n' "$STATE_FILE"
-    printf 'Fit-Modus:     %s\n\n' "$WALLPAPER_FIT"
+    printf 'Fit-Modus:     %s (Konfiguration: %s)\n\n' "$(effective_fit "")" "$WALLPAPER_FIT"
     printf 'Wallpaper-Quellen:\n'
 
     local entry
@@ -760,6 +862,42 @@ cmd_dirs() {
             printf '  ✗ %s (fehlt)\n' "$entry"
         fi
     done
+}
+
+# wallpaper fit                         Darstellung anzeigen
+# wallpaper fit MODE                    globalen Modus setzen (cover|contain|tile|fill)
+# wallpaper fit MODE --monitor MON      Modus nur für einen Monitor
+# wallpaper fit default [--monitor MON] Override bzw. alle Anpassungen entfernen
+cmd_fit() {
+    local mode="" monitor=""
+    while (( $# > 0 )); do
+        case "$1" in
+            --monitor|-m)
+                [[ $# -ge 2 ]] || die "Option $1 benötigt einen Monitor-Namen."
+                monitor="$2"; shift 2 ;;
+            *) [[ -z "$mode" ]] || die "Unbekannte Option: $1"; mode="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$mode" ]]; then
+        printf 'Global: %s\n' "$(effective_fit "")"
+        local m own
+        while IFS= read -r m; do
+            own="$(state_monitor_fit_get "$m")"
+            printf '%-14s %s%s\n' "$m" "$(effective_fit "$m")" "${own:+  (eigener Modus)}"
+        done < <(get_monitors)
+        return 0
+    fi
+
+    [[ -z "$monitor" ]] || monitor_exists "$monitor" || die "Monitor '$monitor' nicht gefunden. Verfügbar: $(get_monitors | paste -sd ', ' -)"
+    if [[ "$mode" == "default" ]]; then
+        state_clear_fit "$monitor"
+    else
+        valid_fit "$mode" || die "Ungültiger Modus '$mode'. Erlaubt: cover, contain, tile, fill, default."
+        if [[ -n "$monitor" ]]; then state_set_monitor_fit "$monitor" "$mode"; else state_set_fit "$mode"; fi
+    fi
+    if [[ -n "$monitor" ]]; then apply_monitor_only "$monitor"; else apply_all; fi
+    notify "Darstellung: ${monitor:-alle} → $mode"
 }
 
 cmd_add() {
@@ -903,6 +1041,31 @@ choose_from_menu() {
     awk -F '\t' -v sel="$chosen" '$2 == sel { print $1; exit }' <<< "$data"
 }
 
+# Menü: Darstellung (Fit) für alle Bildschirme oder einen Monitor wählen
+tui_fit() {
+    local mode_data fit_mode fit_target m
+    mode_data="cover"$'\t'"cover    – füllt den Bildschirm, beschneidet bei Bedarf"$'\n'
+    mode_data+="contain"$'\t'"contain  – zeigt das ganze Bild, mit Rändern"$'\n'
+    mode_data+="fill"$'\t'"fill     – streckt auf die Bildschirmgröße"$'\n'
+    mode_data+="tile"$'\t'"tile     – kachelt das Bild"$'\n'
+    mode_data+="default"$'\t'"↺  Zurück zur Konfiguration"$'\n'
+    fit_mode="$(choose_from_menu "Darstellung: " "Modus wählen..." "$mode_data" 68 6)" || return 0
+    [[ -n "$fit_mode" ]] || return 0
+
+    local target_data="__all__"$'\t'"󰍹  Alle Bildschirme"$'\n'
+    while IFS= read -r m; do
+        target_data+="$m"$'\t'"󰍹  $m  ·  jetzt: $(effective_fit "$m")"$'\n'
+    done < <(get_monitors)
+    fit_target="$(choose_from_menu "Darstellung $fit_mode für: " "Ziel wählen..." "$target_data" 68 6)" || return 0
+    [[ -n "$fit_target" ]] || return 0
+
+    if [[ "$fit_target" == "__all__" ]]; then
+        cmd_fit "$fit_mode"
+    else
+        cmd_fit "$fit_mode" --monitor "$fit_target"
+    fi
+}
+
 cmd_tui() {
     command -v fuzzel >/dev/null 2>&1 || die "fuzzel ist nicht installiert."
     [[ -n "${WAYLAND_DISPLAY:-}" || -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] \
@@ -946,8 +1109,15 @@ cmd_tui() {
             fi
         done < <(get_monitors)
 
+        data+="__fit__"$'\t'"󰹑  Darstellung ändern (Fit)…"$'\n'
+
         target="$(choose_from_menu "Ziel wählen: " "Bildschirm oder alle..." "$data" 68 8)" || exit 0
         [[ -n "$target" ]] || exit 0
+
+        if [[ "$target" == "__fit__" ]]; then
+            tui_fit
+            return
+        fi
     fi
 
     local -a ids=()
@@ -1098,6 +1268,9 @@ main() {
             ;;
         dirs|dir)
             cmd_dirs "$@"
+            ;;
+        fit|scale)
+            cmd_fit "$@"
             ;;
         add)
             cmd_add "$@"

@@ -1,28 +1,28 @@
-# Wallpaper switcher
+# Wallpaper switcher configuration
 
-Hyprpaper-CLI und Fuzzel-TUI mit globalem Default, Monitor-Overrides und Hot-Plug-Wiederherstellung.
+hyprpaper CLI and Fuzzel menu with a global default, per-monitor overrides and hot-plug restore.
 
-**[Dokumentation und CLI-Befehle](https://aco-arch-dotfiles.readthedocs.io/en/latest/components/#wallpaper)** ·
-[Desktop-Anleitung](https://aco-hypr.readthedocs.io/en/latest/keybindings/) ·
-[Installation und Updates](https://aco-arch-dotfiles.readthedocs.io/en/latest/arch-package/)
+**[Documentation](https://aco-docs.readthedocs.io/en/latest/wallpaper/)** ·
+[Guide](https://aco-docs.readthedocs.io/en/latest/wallpaper/guide/) ·
+[Design & dependencies](https://aco-docs.readthedocs.io/en/latest/wallpaper/design/) ·
+[Installation and updates](https://aco-arch-dotfiles.readthedocs.io/en/latest/arch-package/)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Akademie-Olympia/aco-arch-dotfiles/main/install.sh | bash -s -- wallpaper
 ```
 
-Paket: `aco-arch-dotfiles-wallpaper`. Datei: `~/.config/wallpaper/wallpaper.conf`.
-Private Bilder sind kein Paketinhalt; beispielsweise `~/Pictures/Wallpapers` verwenden.
-`wallpaper doctor` prüft die Laufzeitumgebung. Befehle und Konfiguration stehen im Handbuch.
+Package: `aco-arch-dotfiles-wallpaper`. This standalone repository holds the development sources and the package recipe in
+`packaging/arch/PKGBUILD`. The documentation of this component lives in the shared
+[aco-docs](https://github.com/Akademie-Olympia/aco-docs) repository (one Read the Docs project for all small components).
+Push to `main`; after a successful registry build update with `sudo pacman -Syu`. Details and local builds: [PACKAGING.md](PACKAGING.md).
 
-Hier auf `main` pushen; nach erfolgreichem Registry-Build mit `sudo pacman -Syu`
-aktualisieren. Entwicklung und lokale Builds: [PACKAGING.md](PACKAGING.md).
+### Customisation
 
-### Bedienung
+`wallpaper list` shows available images; `wallpaper set FILE` sets the default and `wallpaper set FILE --monitor DP-1` configures one screen separately. `wallpaper doctor` checks the prerequisites. Private images are not part of the package – use for example `~/Pictures/Wallpapers`.
 
-`wallpaper list` zeigt verfügbare Bilder; `wallpaper set DATEI` setzt den Standard. Mit `wallpaper set DATEI --monitor DP-1` lässt sich ein Bildschirm getrennt konfigurieren. `wallpaper doctor` prüft die Voraussetzungen.
-
-Eigene Änderungen in der aktivierten Benutzerkopie bleiben bei der Synchronisierung erhalten; neue abweichende Vorgaben erscheinen als `.pacnew`. Siehe [Update und Wiederherstellung](https://aco-arch-dotfiles.readthedocs.io/en/latest/verification/).
+Your own changes in the activated user copy survive synchronisation; new differing defaults appear as `.pacnew`.
+See [update and recovery](https://aco-arch-dotfiles.readthedocs.io/en/latest/verification/).
 
 [![Package safety](https://github.com/Akademie-Olympia/aco-wallpaper/actions/workflows/package.yml/badge.svg)](https://github.com/Akademie-Olympia/aco-wallpaper/actions/workflows/package.yml)
 
-[MIT-Lizenz](LICENSE).
+[MIT licence](LICENSE).
