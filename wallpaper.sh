@@ -452,16 +452,22 @@ swaybg_mode() {
 # Neues Bild auf einem Monitor: erst die neue swaybg-Instanz starten, dann die
 # alte beenden, damit nie ein leerer Hintergrund aufblitzt.
 wallpaper_set() {
-    local monitor="$1" path="$2" old_pid="" pid
+    local monitor="$1" path="$2" old_pid="" pid lock
     command -v swaybg >/dev/null 2>&1 || die "swaybg ist nicht installiert: sudo pacman -S swaybg"
     mkdir -p "$RUN_DIR"
+    # Hyprland-Start und monitor.added rufen "apply" gleichzeitig auf: pro Monitor
+    # darf nur einer die Instanz tauschen, sonst laufen zwei swaybg nebeneinander.
+    exec {lock}>"$RUN_DIR/$monitor.lock"
+    flock "$lock"
     [[ -f "$RUN_DIR/$monitor.pid" ]] && old_pid="$(<"$RUN_DIR/$monitor.pid")"
-    setsid swaybg -o "$monitor" -i "$path" -m "$(swaybg_mode "$(effective_fit "$monitor")")" >/dev/null 2>&1 < /dev/null &
+    # swaybg must not inherit the lock, or it would hold it for its whole lifetime.
+    setsid swaybg -o "$monitor" -i "$path" -m "$(swaybg_mode "$(effective_fit "$monitor")")" >/dev/null 2>&1 < /dev/null {lock}>&- &
     pid=$!
     # Die alte Instanz erst beenden, wenn die neue sicher läuft.
     sleep 0.5
     if ! kill -0 "$pid" 2>/dev/null; then
         warn "swaybg konnte auf $monitor nicht starten – altes Bild bleibt."
+        exec {lock}>&-
         return 1
     fi
     printf '%s\n' "$pid" > "$RUN_DIR/$monitor.pid"
@@ -469,6 +475,7 @@ wallpaper_set() {
     if [[ -n "$old_pid" && "$old_pid" != "$pid" ]]; then
         kill "$old_pid" 2>/dev/null || true
     fi
+    exec {lock}>&-
 }
 
 apply_monitor() {
