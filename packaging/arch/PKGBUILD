@@ -6,7 +6,7 @@ pkgdesc='Multi-monitor wallpaper CLI and defaults'
 arch=('any')
 url='https://github.com/Akademie-Olympia/aco-arch-dotfiles'
 license=('LicenseRef-arch-dotfiles-bundle')
-depends=('aco-arch-dotfiles-core>=0.3.0' 'hyprpaper' 'fuzzel' 'jq' 'findutils' 'util-linux' 'hyprland')
+depends=('aco-arch-dotfiles-core>=0.3.0' 'aco-arch-dotfiles-aco-theme' 'aco-arch-dotfiles-rofi' 'swaybg' 'librsvg' 'imagemagick' 'jq' 'findutils' 'util-linux' 'hyprland')
 optdepends=()
 replaces=('arch-dotfiles-wallpaper')
 conflicts=('arch-dotfiles-wallpaper')

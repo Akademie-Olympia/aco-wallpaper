@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-# wallpaper.sh - Wallpaper-Switcher für Hyprland (hyprpaper)
+# wallpaper.sh - Wallpaper-Switcher für Hyprland (swaybg)
 # ============================================================================
 # - Default-Wallpaper für alle Bildschirme
 # - Pro-Monitor-Overrides (z. B. für Zweit-/Drittschirme)
 # - Wallpaper-Ordner werden automatisch eingelesen (neue Bilder einfach ablegen)
-# - Fuzzel-TUI bei Aufruf ohne Argumente, vollständige CLI mit Parametern
+# - Menü (aco-menu) bei Aufruf ohne Argumente, Bildauswahl als Vorschau-Raster,
+#   vollständige CLI mit Parametern
 #
 # Beispiele:
 #   wallpaper                                  TUI öffnen
@@ -33,6 +34,14 @@ STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 CONFIG_FILE="${WALLPAPER_CONFIG:-$CONFIG_HOME/wallpaper/wallpaper.conf}"
 STATE_DIR="$STATE_HOME/wallpaper"
 STATE_FILE="$STATE_DIR/state"
+# Laufende swaybg-Instanzen (eine pro Monitor): PID und Bild, nur für diese Sitzung.
+RUN_DIR="${XDG_RUNTIME_DIR:-/tmp}/wallpaper"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/aco/wallpaper"
+# Das mitgelieferte ACO-Hintergrundbild: aco-theme rendert das SVG passend zu
+# Hell/Dunkel und Akzent, hier wird es in ein PNG für swaybg umgewandelt.
+GENERATED_SVG="$CONFIG_HOME/aco/theme/wallpaper/aco.svg"
+GENERATED_DIR="$CACHE_DIR/generated"
+THUMB_DIR="$CACHE_DIR/thumbnails"
 
 # Direkt aus dem Repository gestartet? Dann die Repo-Konfiguration verwenden.
 if [[ ! -r "$CONFIG_FILE" && -r "$SCRIPT_DIR/wallpaper.conf" ]]; then
@@ -64,8 +73,8 @@ notify() {
     case "${WALLPAPER_NOTIFY:-1}" in
         0|false|no|off) return 0 ;;
     esac
-    command -v hyprctl >/dev/null 2>&1 || return 0
-    hyprctl notify -1 2200 "rgb(89b4fa)" "$*" >/dev/null 2>&1 || true
+    command -v notify-send >/dev/null 2>&1 || return 0
+    notify-send -a Hintergrund -i preferences-desktop-wallpaper "Hintergrund" "$*" >/dev/null 2>&1 || true
 }
 
 # ----------------------------------------------------------------------------
@@ -84,6 +93,10 @@ load_config() {
     if (( ${#WALLPAPER_DIRS[@]} == 0 )); then
         WALLPAPER_DIRS=("$DOTFILES_ROOT/pictures")
     fi
+    # Das generierte ACO-Bild steht immer zuerst und ist damit der Default,
+    # solange niemand ein eigenes Bild gewählt hat.
+    ensure_generated
+    WALLPAPER_DIRS=("$GENERATED_DIR" "${WALLPAPER_DIRS[@]}")
 
     # Mit "wallpaper dirs add" ergänzte Ordner (Status, nicht Konfiguration)
     local extra
@@ -98,6 +111,33 @@ load_config() {
             WALLPAPER_FIT="cover"
             ;;
     esac
+}
+
+# Größte Pixelfläche der angeschlossenen Monitore (Fallback 3840x2160 ohne Hyprland).
+largest_monitor_size() {
+    hyprctl monitors -j 2>/dev/null \
+        | jq -r 'max_by(.width * .height) | "\(.width)x\(.height)"' 2>/dev/null \
+        || echo 3840x2160
+}
+
+# SVG -> PNG in Monitorgröße, nur wenn sich SVG (Theme-Wechsel) oder Größe geändert haben.
+ensure_generated() {
+    local png="$GENERATED_DIR/aco.png" size_file="$GENERATED_DIR/aco.size" size
+    [[ -r "$GENERATED_SVG" ]] || return 0
+    size="$(largest_monitor_size)"
+    [[ "$size" =~ ^[0-9]+x[0-9]+$ ]] || size=3840x2160
+    if [[ -f "$png" && "$png" -nt "$GENERATED_SVG" && "$(cat "$size_file" 2>/dev/null)" == "$size" ]]; then
+        return 0
+    fi
+    command -v rsvg-convert >/dev/null 2>&1 || { warn "rsvg-convert fehlt – ACO-Hintergrund nicht verfügbar."; return 0; }
+    mkdir -p "$GENERATED_DIR"
+    if rsvg-convert --width "${size%x*}" --height "${size#*x}" --output "$png.tmp" "$GENERATED_SVG"; then
+        mv -f "$png.tmp" "$png"
+        printf '%s\n' "$size" > "$size_file"
+    else
+        rm -f "$png.tmp"
+        warn "ACO-Hintergrund konnte nicht erzeugt werden."
+    fi
 }
 
 state_init() {
@@ -399,37 +439,36 @@ monitor_exists() {
     get_monitors | grep -Fxq -- "$monitor"
 }
 
-ensure_daemon() {
-    command -v hyprpaper >/dev/null 2>&1 \
-        || die "hyprpaper ist nicht installiert. Installiere es mit: sudo pacman -S hyprpaper"
-
-    if pgrep -x hyprpaper >/dev/null 2>&1; then
-        # Läuft bereits und antwortet die IPC? Sonst z. B. nach einem
-        # Hyprland-Neustart verwaist -> neu starten.
-        hyprctl hyprpaper listactive >/dev/null 2>&1 && return 0
-        warn "hyprpaper läuft, aber die IPC antwortet nicht – starte neu."
-        pkill -x hyprpaper >/dev/null 2>&1 || true
-        sleep 0.2
-    fi
-
-    info "Starte hyprpaper..."
-    setsid hyprpaper >/dev/null 2>&1 < /dev/null &
-    disown 2>/dev/null || true
-
-    local i
-    for i in {1..30}; do
-        if hyprctl hyprpaper listactive >/dev/null 2>&1; then
-            return 0
-        fi
-        sleep 0.1
-    done
-
-    die "hyprpaper konnte nicht gestartet werden (IPC nicht erreichbar)."
+# swaybg-Darstellung zum Fit-Modus
+swaybg_mode() {
+    case "$1" in
+        cover) echo fill ;;
+        contain) echo fit ;;
+        fill) echo stretch ;;
+        tile) echo tile ;;
+    esac
 }
 
-hyprpaper_set() {
-    local monitor="$1" path="$2"
-    hyprctl hyprpaper wallpaper "${monitor},${path},$(effective_fit "$monitor")" >/dev/null
+# Neues Bild auf einem Monitor: erst die neue swaybg-Instanz starten, dann die
+# alte beenden, damit nie ein leerer Hintergrund aufblitzt.
+wallpaper_set() {
+    local monitor="$1" path="$2" old_pid="" pid
+    command -v swaybg >/dev/null 2>&1 || die "swaybg ist nicht installiert: sudo pacman -S swaybg"
+    mkdir -p "$RUN_DIR"
+    [[ -f "$RUN_DIR/$monitor.pid" ]] && old_pid="$(<"$RUN_DIR/$monitor.pid")"
+    setsid swaybg -o "$monitor" -i "$path" -m "$(swaybg_mode "$(effective_fit "$monitor")")" >/dev/null 2>&1 < /dev/null &
+    pid=$!
+    # Die alte Instanz erst beenden, wenn die neue sicher läuft.
+    sleep 0.5
+    if ! kill -0 "$pid" 2>/dev/null; then
+        warn "swaybg konnte auf $monitor nicht starten – altes Bild bleibt."
+        return 1
+    fi
+    printf '%s\n' "$pid" > "$RUN_DIR/$monitor.pid"
+    printf '%s\n' "$path" > "$RUN_DIR/$monitor.path"
+    if [[ -n "$old_pid" && "$old_pid" != "$pid" ]]; then
+        kill "$old_pid" 2>/dev/null || true
+    fi
 }
 
 apply_monitor() {
@@ -445,7 +484,7 @@ apply_monitor() {
             || die "Auch das Default-Wallpaper '$default_id' ist nicht mehr verfügbar."
     fi
 
-    if ! hyprpaper_set "$monitor" "$abs"; then
+    if ! wallpaper_set "$monitor" "$abs"; then
         warn "Konnte das Wallpaper für $monitor nicht setzen (Monitor noch nicht bereit?)."
         return 0
     fi
@@ -453,16 +492,10 @@ apply_monitor() {
 }
 
 apply_all() {
-    local default_id default_abs
+    local default_id
     default_id="$(ensure_default)"
-    default_abs="$(resolve_wallpaper "$default_id" 2>/dev/null)" \
+    resolve_wallpaper "$default_id" >/dev/null 2>&1 \
         || die "Default-Wallpaper '$default_id' ist nicht mehr verfügbar."
-
-    ensure_daemon
-
-    # Fallback für neu angeschlossene Monitore (hyprpaper nutzt ihn nur,
-    # solange für den Monitor noch kein eigener Eintrag gesetzt wurde)
-    hyprpaper_set "" "$default_abs" || true
 
     local -a monitors=()
     mapfile -t monitors < <(get_monitors)
@@ -478,7 +511,6 @@ apply_monitor_only() {
     local monitor="$1"
     monitor_exists "$monitor" || die "Monitor '$monitor' nicht gefunden. Verfügbar: $(get_monitors | paste -sd ', ' -)"
 
-    ensure_daemon
     local default_id
     default_id="$(ensure_default)"
     apply_monitor "$monitor" "$default_id"
@@ -648,9 +680,8 @@ cmd_apply() {
 }
 
 cmd_current() {
-    local default_id active_map m override effective active source
+    local default_id m override effective active source
     default_id="$(ensure_default)"
-    active_map="$(hyprctl hyprpaper listactive 2>/dev/null || true)"
 
     printf 'Default: %s\n\n' "$default_id"
     printf '%-14s %-9s %s\n' "MONITOR" "QUELLE" "AKTIV"
@@ -662,11 +693,12 @@ cmd_current() {
         source="Default"
         [[ -n "$override" ]] && source="Eigenes"
 
-        active="$(awk -v mon="$m" '
-            index($0, mon ": ") == 1 { print substr($0, length(mon) + 3); exit }
-        ' <<< "$active_map")"
+        active=""
+        if [[ -f "$RUN_DIR/$m.pid" ]] && kill -0 "$(<"$RUN_DIR/$m.pid")" 2>/dev/null; then
+            active="$(<"$RUN_DIR/$m.path")"
+        fi
 
-        printf '%-14s %-9s %s\n' "$m" "$source" "${active:-– (hyprpaper nicht aktiv)}"
+        printf '%-14s %-9s %s\n' "$m" "$source" "${active:-– (swaybg nicht aktiv)}"
         [[ -n "$active" ]] || printf '%-14s %-9s %s\n' "" "" "gespeichert: $effective"
     done < <(get_monitors)
 }
@@ -985,9 +1017,9 @@ cmd_open() {
 }
 
 cmd_reload() {
-    info "Starte hyprpaper neu..."
-    pkill -x hyprpaper >/dev/null 2>&1 || true
-    sleep 0.3
+    info "Starte swaybg neu..."
+    pkill -x swaybg >/dev/null 2>&1 || true
+    rm -f "$RUN_DIR"/*.pid "$RUN_DIR"/*.path
     apply_all
 }
 
@@ -1000,7 +1032,7 @@ cmd_doctor() {
     printf '\nProgramme:\n'
 
     local c
-    for c in hyprctl hyprpaper jq fuzzel; do
+    for c in hyprctl swaybg rsvg-convert magick jq aco-menu; do
         if command -v "$c" >/dev/null 2>&1; then
             printf '  ✓ %-10s %s\n' "$c" "$(command -v "$c")"
         else
@@ -1009,10 +1041,10 @@ cmd_doctor() {
     done
 
     printf '\nLaufzeit:\n'
-    if pgrep -x hyprpaper >/dev/null 2>&1; then
-        printf '  ✓ hyprpaper läuft (PID %s)\n' "$(pgrep -x hyprpaper | paste -sd ',' -)"
+    if pgrep -x swaybg >/dev/null 2>&1; then
+        printf '  ✓ swaybg läuft (PID %s)\n' "$(pgrep -x swaybg | paste -sd ',' -)"
     else
-        printf '  ✗ hyprpaper läuft nicht\n'
+        printf '  ✗ swaybg läuft nicht\n'
     fi
 
     if command -v hyprctl >/dev/null 2>&1; then
@@ -1022,8 +1054,21 @@ cmd_doctor() {
 }
 
 # ----------------------------------------------------------------------------
-# Fuzzel-TUI
+# Menüs (aco-menu)
 # ----------------------------------------------------------------------------
+# Kleine 16:9-Vorschau für das Raster, im Cache nach Pfad und Änderungszeit.
+thumbnail() {
+    local src="$1" key thumb
+    key="$(printf '%s %s' "$src" "$(stat -c %Y -- "$src")" | md5sum | cut -c1-16)"
+    thumb="$THUMB_DIR/$key.png"
+    if [[ ! -f "$thumb" ]]; then
+        mkdir -p "$THUMB_DIR"
+        magick "${src}[0]" -thumbnail 384x216^ -gravity center -extent 384x216 "$thumb" 2>/dev/null \
+            || { printf '%s' "$src"; return; }
+    fi
+    printf '%s' "$thumb"
+}
+
 choose_from_menu() {
     local prompt="$1" placeholder="$2" data="$3" width="$4" lines="$5"
     local display chosen
@@ -1031,11 +1076,11 @@ choose_from_menu() {
     display="$(printf '%s' "$data" | cut -f2-)"
     [[ -n "$display" ]] || return 1
 
-    chosen="$(printf '%s\n' "$display" | fuzzel --dmenu \
-        --prompt="$prompt" \
-        --placeholder="$placeholder" \
-        --width="$width" \
-        --lines="$lines")" || return 1
+    chosen="$(printf '%s\n' "$display" | aco-menu \
+        --prompt "$prompt" \
+        --placeholder "$placeholder" \
+        --width "$width" \
+        --lines "$lines")" || return 1
 
     [[ -n "$chosen" ]] || return 1
     awk -F '\t' -v sel="$chosen" '$2 == sel { print $1; exit }' <<< "$data"
@@ -1049,14 +1094,14 @@ tui_fit() {
     mode_data+="fill"$'\t'"fill     – streckt auf die Bildschirmgröße"$'\n'
     mode_data+="tile"$'\t'"tile     – kachelt das Bild"$'\n'
     mode_data+="default"$'\t'"↺  Zurück zur Konfiguration"$'\n'
-    fit_mode="$(choose_from_menu "Darstellung: " "Modus wählen..." "$mode_data" 68 6)" || return 0
+    fit_mode="$(choose_from_menu "Darstellung: " "Modus wählen..." "$mode_data" 40 6)" || return 0
     [[ -n "$fit_mode" ]] || return 0
 
     local target_data="__all__"$'\t'"󰍹  Alle Bildschirme"$'\n'
     while IFS= read -r m; do
         target_data+="$m"$'\t'"󰍹  $m  ·  jetzt: $(effective_fit "$m")"$'\n'
     done < <(get_monitors)
-    fit_target="$(choose_from_menu "Darstellung $fit_mode für: " "Ziel wählen..." "$target_data" 68 6)" || return 0
+    fit_target="$(choose_from_menu "Darstellung $fit_mode für: " "Ziel wählen..." "$target_data" 40 6)" || return 0
     [[ -n "$fit_target" ]] || return 0
 
     if [[ "$fit_target" == "__all__" ]]; then
@@ -1067,15 +1112,9 @@ tui_fit() {
 }
 
 cmd_tui() {
-    command -v fuzzel >/dev/null 2>&1 || die "fuzzel ist nicht installiert."
+    command -v aco-menu >/dev/null 2>&1 || die "aco-menu ist nicht installiert (Paket aco-arch-dotfiles-rofi)."
     [[ -n "${WAYLAND_DISPLAY:-}" || -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] \
         || die "Die TUI benötigt eine laufende Hyprland-Session (oder nutze die CLI, z. B. 'wallpaper list')."
-
-    # Wie Window-Switcher/Powermenu: bereits offenes Fuzzel zuerst schließen
-    if pgrep -x fuzzel >/dev/null 2>&1; then
-        pkill -x fuzzel
-        exit 0
-    fi
 
     local only_monitor=""
     while (( $# > 0 )); do
@@ -1097,6 +1136,9 @@ cmd_tui() {
     if [[ -n "$only_monitor" ]]; then
         monitor_exists "$only_monitor" || die "Monitor '$only_monitor' nicht gefunden."
         target="$only_monitor"
+    elif (( $(get_monitors | wc -l) == 1 )); then
+        # Nur ein Bildschirm: keine Zielfrage, direkt zum Raster.
+        target="__all__"
     else
         data="__all__"$'\t'"󰍹  Alle Bildschirme (einheitlich)  ·  $default_id"$'\n'
         data+="__default__"$'\t'"★  Nur Default (Overrides behalten)  ·  $default_id"$'\n'
@@ -1111,7 +1153,7 @@ cmd_tui() {
 
         data+="__fit__"$'\t'"󰹑  Darstellung ändern (Fit)…"$'\n'
 
-        target="$(choose_from_menu "Ziel wählen: " "Bildschirm oder alle..." "$data" 68 8)" || exit 0
+        target="$(choose_from_menu "Ziel wählen: " "Bildschirm oder alle..." "$data" 40 8)" || exit 0
         [[ -n "$target" ]] || exit 0
 
         if [[ "$target" == "__fit__" ]]; then
@@ -1132,26 +1174,34 @@ cmd_tui() {
         [[ -n "$current" ]] || current="$default_id"
     fi
 
-    data="__random__"$'\t'"󰒝  Zufällig"$'\n'
-    if [[ "$target" != "__all__" && "$target" != "all" && "$target" != "__default__" ]]; then
-        data+="__reset__"$'\t'"↺  Default verwenden"$'\n'
-    fi
-    local id marker
-    for id in "${ids[@]}"; do
-        marker="  "
-        [[ "$id" == "$current" ]] && marker="★ "
-        data+="$id"$'\t'"$marker$id"$'\n'
-    done
-
-    local lines=$(( ${#ids[@]} + 2 ))
-    (( lines > 14 )) && lines=14
     local target_label="$target"
     [[ "$target" == "__all__" || "$target" == "all" ]] && target_label="alle Bildschirme"
     [[ "$target" == "__default__" ]] && target_label="Default"
 
-    local choice
-    choice="$(choose_from_menu "Wallpaper für $target_label: " "Wallpaper suchen..." "$data" 72 "$lines")" || exit 0
-    [[ -n "$choice" ]] || exit 0
+    # Raster: Sonderaktionen zuerst, dann jedes Bild mit Vorschau (★ = aktuell).
+    local -a choices=() labels=() icons=()
+    if [[ "$target" != "__all__" && "$target" != "all" && "$target" != "__default__" ]]; then
+        choices+=(__reset__) labels+=("Default verwenden") icons+=(edit-undo-symbolic)
+    fi
+    choices+=(__random__) labels+=("Zufällig") icons+=(media-playlist-shuffle-symbolic)
+    choices+=(__fit__) labels+=("Darstellung") icons+=(zoom-fit-best-symbolic)
+    local id abs label
+    while IFS=$'\t' read -r id abs; do
+        label="$(basename -- "${id%.*}")"
+        [[ "$id" == "$current" ]] && label="★ $label"
+        choices+=("$id") labels+=("$label") icons+=("$(thumbnail "$abs")")
+    done < <(list_wallpapers)
+
+    local index i choice
+    index="$(for i in "${!labels[@]}"; do printf '%s\0icon\x1f%s\n' "${labels[$i]}" "${icons[$i]}"; done |
+        aco-menu --grid --index --prompt "󰸉" --placeholder "Hintergrund für $target_label")" || exit 0
+    [[ "$index" =~ ^[0-9]+$ ]] || exit 0
+    choice="${choices[$index]}"
+
+    if [[ "$choice" == "__fit__" ]]; then
+        tui_fit
+        return
+    fi
 
     if [[ "$choice" == "__random__" ]]; then
         local idx=$(( RANDOM % ${#ids[@]} ))
@@ -1166,11 +1216,11 @@ cmd_tui() {
 # ----------------------------------------------------------------------------
 usage() {
     cat <<EOF
-Wallpaper-Switcher für Hyprland (hyprpaper)
+Wallpaper-Switcher für Hyprland (swaybg)
 
 Verwendung: $(basename "$0") [BEFEHL] [OPTIONEN]
 
-Ohne Befehl wird die Fuzzel-TUI geöffnet.
+Ohne Befehl wird das Menü geöffnet (Ziel wählen, dann Bild aus dem Vorschau-Raster).
 
 Befehle:
   tui [--monitor MON]        Interaktive Auswahl (Ziel + Wallpaper)
@@ -1188,7 +1238,7 @@ Befehle:
                              Zufälliges Wallpaper
   apply [--quiet] [--monitor MON]
                              Gespeicherte Belegung (erneut) anwenden
-  reload                     hyprpaper neu starten und Belegung anwenden
+  reload                     swaybg neu starten und Belegung anwenden
   dirs                       Wallpaper-Ordner und Konfiguration anzeigen
   add <datei>... [--move] [--set]
                              Bilder in die Bibliothek kopieren/verschieben
