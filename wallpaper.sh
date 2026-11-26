@@ -42,6 +42,8 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/aco/wallpaper"
 GENERATED_SVG="$CONFIG_HOME/aco/theme/wallpaper/aco.svg"
 GENERATED_DIR="$CACHE_DIR/generated"
 THUMB_DIR="$CACHE_DIR/thumbnails"
+# Link to the wallpaper of the first monitor; the lock screen (hyprlock) shows it.
+CURRENT_LINK="$CACHE_DIR/current"
 
 # Direkt aus dem Repository gestartet? Dann die Repo-Konfiguration verwenden.
 if [[ ! -r "$CONFIG_FILE" && -r "$SCRIPT_DIR/wallpaper.conf" ]]; then
@@ -472,10 +474,25 @@ wallpaper_set() {
     fi
     printf '%s\n' "$pid" > "$RUN_DIR/$monitor.pid"
     printf '%s\n' "$path" > "$RUN_DIR/$monitor.path"
+    [[ "$monitor" == "$(get_monitors | head -n 1)" ]] && record_primary "$path"
     if [[ -n "$old_pid" && "$old_pid" != "$pid" ]]; then
         kill "$old_pid" 2>/dev/null || true
     fi
     exec {lock}>&-
+}
+
+# The first monitor's wallpaper decides the bar style (light or dark text, see
+# `aco-theme bar`) and is what the lock screen shows. The tone is the mean
+# brightness of the top edge, where the bar sits.
+record_primary() {
+    local path="$1" mean tone
+    mkdir -p "$CACHE_DIR"
+    ln -sfn "$path" "$CURRENT_LINK"
+    command -v magick >/dev/null 2>&1 && command -v aco-theme >/dev/null 2>&1 || return 0
+    mean="$(magick "$path" -resize 256x -gravity North -crop 100%x5%+0+0 +repage \
+        -colorspace Gray -format '%[fx:mean]' info: 2>/dev/null)" || return 0
+    tone="$(awk -v m="$mean" 'BEGIN { print (m > 0.55) ? "light" : "dark" }')"
+    aco-theme --quiet bar tone "$tone" || true
 }
 
 apply_monitor() {

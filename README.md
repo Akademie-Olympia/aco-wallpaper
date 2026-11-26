@@ -31,3 +31,11 @@ See [update and recovery](https://aco-arch-dotfiles.readthedocs.io/en/latest/ver
 [![Package safety](https://github.com/Akademie-Olympia/aco-wallpaper/actions/workflows/package.yml/badge.svg)](https://github.com/Akademie-Olympia/aco-wallpaper/actions/workflows/package.yml)
 
 [MIT licence](LICENSE).
+
+### Bar and lock screen
+
+After setting a wallpaper, `wallpaper.sh` measures the brightness of the top edge of the first monitor's image (ImageMagick)
+and tells aco-theme (`aco-theme bar tone light|dark`), so an automatic bar uses dark text
+on light wallpapers and light text on dark ones. It also links that image to `~/.cache/aco/wallpaper/current`,
+which the lock screen shows.
+
