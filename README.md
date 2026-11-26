@@ -32,6 +32,12 @@ See [update and recovery](https://aco-arch-dotfiles.readthedocs.io/en/latest/ver
 
 [MIT licence](LICENSE).
 
+### Default background
+
+The generated ACO background (`aco-theme/aco.svg.tpl`) is a set of layered waves in the accent and palette colours
+over a calm gradient; it follows light/dark and the accent and is always the first and default wallpaper. Your own
+images go into `~/Pictures/Wallpapers`.
+
 ### Bar and lock screen
 
 After setting a wallpaper, `wallpaper.sh` measures the brightness of the top edge of the first monitor's image (ImageMagick)
