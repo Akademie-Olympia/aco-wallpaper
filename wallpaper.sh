@@ -741,6 +741,13 @@ cmd_list() {
                 plain=1
                 shift
                 ;;
+            --tsv)
+                # Maschinenlesbar für die Einstellungs-App: Name, Pfad, Default (1/0).
+                local default_tsv
+                default_tsv="$(ensure_default)"
+                list_wallpapers | awk -F '\t' -v d="$default_tsv" '{ print $1 "\t" $2 "\t" ($1 == d ? 1 : 0) }'
+                return 0
+                ;;
             *)
                 die "Unbekannte Option: $1"
                 ;;
@@ -1249,6 +1256,7 @@ Ohne Befehl wird das Menü geöffnet (Ziel wählen, dann Bild aus dem Vorschau-R
 Befehle:
   tui [--monitor MON]        Interaktive Auswahl (Ziel + Wallpaper)
   list [--monitor MON]       Verfügbare Wallpapers anzeigen (★ Default, ● Override)
+  list --tsv                 Name, Pfad und Default (1/0) je Zeile, tabulatorgetrennt
   set <name|pfad> [--monitor MON | --all]
                              Default setzen (ohne Ziel) bzw. Monitor-Override
   default [<name|pfad>]      Default anzeigen oder setzen
